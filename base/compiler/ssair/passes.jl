@@ -1258,6 +1258,7 @@ end
 
 """
     abstract type EscapeInformation end
+
 A lattice for escape information, which has the following elements:
 - `NoInformation`: the top element of this lattice, meaning no information is derived
 - `NoEscape`: the second topmost element of this lattice, meaning it will not escape from this local frame
@@ -1331,7 +1332,7 @@ function find_escapes!(ir::IRCode, nargs::Int)
         for pc in nstmts:-1:1
             stmt = stmts.inst[pc]
 
-            # inlinear already computed effect-freeness of this statement (whether it may throw or not)
+            # inliner already computed effect-freeness of this statement (whether it may throw or not)
             # and if it may throw, we conservatively escape all the arguments
             is_effect_free = stmts.flag[pc] & IR_FLAG_EFFECT_FREE ≠ 0
 
@@ -1340,7 +1341,7 @@ function find_escapes!(ir::IRCode, nargs::Int)
                 head = stmt.head
                 if head === :call # TODO implement more builtins, make them more accurate
                     if !is_effect_free
-                        # TODO we can have a look at builtins.c and limit the escaped arguments if any of them are not thrown
+                        # TODO we can have a look at builtins.c and limit the escaped arguments if any of them are not captured in the thrown exception
                         add_changes!(stmt.args[2:end], ir, Escape(), changes)
                     else
                         escape_call!(stmt.args, pc, state, ir, changes) || continue
