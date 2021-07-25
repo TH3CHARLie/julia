@@ -84,6 +84,10 @@
 #endif
 #include <llvm/Target/TargetMachine.h>
 
+#include "llvm/Support/Path.h" // for llvm::sys::path
+#include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/Linker/Linker.h>
+
 using namespace llvm;
 
 typedef Instruction TerminatorInst;
@@ -946,11 +950,13 @@ static bool jl_is_pointerfree(jl_value_t* t)
 
 // these queries are usually related, but we split them out here
 // for convenience and clarity (and because it changes the calling convention)
+// n.b. this must include jl_is_datatype_singleton (ghostType) and primitive types
 static bool deserves_stack(jl_value_t* t)
 {
     if (!jl_is_concrete_immutable(t))
         return false;
-    return jl_datatype_isinlinealloc((jl_datatype_t*)t, 0);
+    jl_datatype_t *dt = (jl_datatype_t*)t;
+    return jl_is_datatype_singleton(dt) || jl_datatype_isinlinealloc(dt, 0);
 }
 static bool deserves_argbox(jl_value_t* t)
 {
