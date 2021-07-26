@@ -1347,18 +1347,19 @@ function find_escapes!(ir::IRCode, nargs::Int)
                         escape_call!(stmt.args, pc, state, ir, changes) || continue
                     end
                 elseif head === :invoke
-                    linfo = first(stmt.args)
-                    escapes_for_call = get(GLOBAL_ESCAPE_CACHE, linfo, nothing)
-                    if isnothing(escapes_for_call)
+                    # linfo = first(stmt.args)
+                    # escapes_for_call = get(GLOBAL_ESCAPE_CACHE, linfo, nothing)
+                    # if isnothing(escapes_for_call)
+                    # TODO: (Xuanda) fix call cache
                         add_changes!(stmt.args[3:end], ir, Escape(), changes)
-                    else
-                        for (arg, info) in zip(stmt.args[2:end], escapes_for_call.arguments)
-                            if info === ReturnEscape()
-                                info = NoEscape()
-                            end
-                            push!(changes, (arg, info))
-                        end
-                    end
+                    # else
+                    #     for (arg, info) in zip(stmt.args[2:end], escapes_for_call.arguments)
+                    #         if info === ReturnEscape()
+                    #             info = NoEscape()
+                    #         end
+                    #         push!(changes, (arg, info))
+                    #     end
+                    # end
                 elseif head === :new
                     info = state.ssavalues[pc]
                     info === NoInformation() && (info = NoEscape())
@@ -1493,9 +1494,10 @@ function add_changes!(args::Vector{Any}, ir::IRCode, @nospecialize(info::EscapeI
 end
 
 function add_change!(@nospecialize(x), ir::IRCode, @nospecialize(info::EscapeInformation), changes::Changes)
-    if !isbitstype(widenconst(argextype(x, ir, ir.sptypes, ir.argtypes)))
+    # if !isbitstype(widenconst(argextype(x, ir, ir.sptypes, ir.argtypes)))
+        # TODO:(Xuanda) fix this: during bootstrapping not every x is of argument-position value
         push!(changes, (x, info))
-    end
+    # end
 end
 
 function escape_call!(args::Vector{Any}, pc::Int, state::EscapeState, ir::IRCode, changes::Changes)
