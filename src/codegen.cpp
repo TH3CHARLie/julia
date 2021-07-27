@@ -2758,7 +2758,7 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
             return true;
         }
         if (jl_is_tuple_type(rt) && jl_is_concrete_type(rt) && nargs == jl_datatype_nfields(rt)) {
-            *ret = emit_new_struct(ctx, rt, nargs, &argv[1]);
+            *ret = emit_new_struct(ctx, rt, nargs, &argv[1], false);
             return true;
         }
     }
@@ -4664,10 +4664,12 @@ static jl_cgval_t emit_expr(jl_codectx_t &ctx, jl_value_t *expr, ssize_t ssaval)
             jl_code_info_t *info = ctx.source;
             uint8_t ssaflag = jl_array_len(info->ssaflags) > ssaval ? ((uint8_t*)jl_array_data(info->ssaflags))[ssaval] : 0;
             // uint8_t ssaflag = ((uint8_t*)jl_array_data(info->ssaflags))[ssaval];
-            if ((ssaflag & IR_FLAG_NO_ESCAPE) != 0)
+            bool tag_metadata = false;
+            if ((ssaflag & IR_FLAG_NO_ESCAPE) != 0) {
+                tag_metadata = true;
                 printf("locate no-escape flag set stmt !!!!!! %d %d\n", ssaflag & IR_FLAG_NO_ESCAPE, ssaval);
-            // TODO: figure out which path in emit_new_struct should we emit metadata on
-            return emit_new_struct(ctx, jl_tparam0(ty), nargs - 1, &argv[1]);
+            }
+            return emit_new_struct(ctx, jl_tparam0(ty), nargs - 1, &argv[1], tag_metadata);
         }
         Value *val = emit_jlcall(ctx, jlnew_func, nullptr, argv, nargs, JLCALL_F_CC);
         // temporarily mark as `Any`, expecting `emit_ssaval_assign` to update
@@ -4755,7 +4757,7 @@ static jl_cgval_t emit_expr(jl_codectx_t &ctx, jl_value_t *expr, ssize_t ssaval)
             jl_cgval_t env;
             // TODO: Inline the env at the end of the opaque closure and generate a descriptor for GC
             if (jl_is_concrete_type((jl_value_t*)env_t)) {
-                env = emit_new_struct(ctx, (jl_value_t*)env_t, nargs-5, &argv.data()[5]);
+                env = emit_new_struct(ctx, (jl_value_t*)env_t, nargs-5, &argv.data()[5], false);
             }
             else {
                 Value *env_val = emit_jlcall(ctx, jltuple_func, V_rnull,
@@ -4813,7 +4815,7 @@ static jl_cgval_t emit_expr(jl_codectx_t &ctx, jl_value_t *expr, ssize_t ssaval)
                 fptr
             };
 
-            jl_cgval_t ret = emit_new_struct(ctx, closure_t, 6, closure_fields);
+            jl_cgval_t ret = emit_new_struct(ctx, closure_t, 6, closure_fields, false);
 
             ctx.oc_modules.push_back(std::move(closure_m));
 
@@ -6766,7 +6768,7 @@ static std::pair<std::unique_ptr<Module>, jl_llvm_functions_t>
                 vargs[i - nreq] = get_specsig_arg(argType, llvmArgType, isboxed);
             }
             if (jl_is_concrete_type(vi.value.typ)) {
-                jl_cgval_t tuple = emit_new_struct(ctx, vi.value.typ, ctx.nvargs, vargs);
+                jl_cgval_t tuple = emit_new_struct(ctx, vi.value.typ, ctx.nvargs, vargs, false);
                 emit_varinfo_assign(ctx, vi, tuple);
             }
             else {

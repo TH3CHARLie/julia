@@ -3266,7 +3266,7 @@ static jl_cgval_t emit_setfield(jl_codectx_t &ctx,
     }
 }
 
-static jl_cgval_t emit_new_struct(jl_codectx_t &ctx, jl_value_t *ty, size_t nargs, const jl_cgval_t *argv)
+static jl_cgval_t emit_new_struct(jl_codectx_t &ctx, jl_value_t *ty, size_t nargs, const jl_cgval_t *argv, bool tag_metadata)
 {
     assert(jl_is_datatype(ty));
     assert(jl_is_concrete_type(ty));
@@ -3420,6 +3420,11 @@ static jl_cgval_t emit_new_struct(jl_codectx_t &ctx, jl_value_t *ty, size_t narg
         }
         Value *strct = emit_allocobj(ctx, jl_datatype_size(sty),
                                      literal_pointer_val(ctx, (jl_value_t*)ty));
+        if (tag_metadata) {
+            MDNode* temp_node = MDNode::get(jl_LLVMContext, ConstantAsMetadata::get(ConstantInt::get(jl_LLVMContext, llvm::APInt(64, 0, false))));
+            MDNode* node = MDNode::get(jl_LLVMContext, temp_node);
+            ((CallInst *)strct)->setMetadata("julia.noescape", node);
+        }
         jl_cgval_t strctinfo = mark_julia_type(ctx, strct, true, ty);
         strct = decay_derived(ctx, strct);
         undef_derived_strct(ctx.builder, strct, sty, strctinfo.tbaa);
