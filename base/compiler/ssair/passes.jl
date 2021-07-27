@@ -1387,7 +1387,7 @@ function find_escapes!(ir::IRCode, nargs::Int)
                     # TODO: we can apply similar strategy like builtin calls
                     #       to specialize some foreigncalls
                     foreigncall_nargs = length((stmt.args[3])::SimpleVector)
-                    add_change!(stmt.args[1], ir, Escape(), changes)
+                    push!(changes, (stmt.args[1], Escape()))
                     add_changes!(stmt.args[6:5+foreigncall_nargs], ir, Escape(), changes)
                 elseif is_meta_expr_head(head)
                     continue
@@ -1494,10 +1494,9 @@ function add_changes!(args::Vector{Any}, ir::IRCode, @nospecialize(info::EscapeI
 end
 
 function add_change!(@nospecialize(x), ir::IRCode, @nospecialize(info::EscapeInformation), changes::Changes)
-    # if !isbitstype(widenconst(argextype(x, ir, ir.sptypes, ir.argtypes)))
-        # TODO:(Xuanda) fix this: during bootstrapping not every x is of argument-position value
+    if !isbitstype(widenconst(argextype(x, ir, ir.sptypes, ir.argtypes)))
         push!(changes, (x, info))
-    # end
+    end
 end
 
 function escape_call!(args::Vector{Any}, pc::Int, state::EscapeState, ir::IRCode, changes::Changes)

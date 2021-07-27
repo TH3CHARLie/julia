@@ -302,10 +302,7 @@ function run_passes(ci::CodeInfo, nargs::Int, sv::OptimizationState)
     ir = compact!(ir)
     # set false to disable the pass by default
     # to enable it, use Revise.jl
-    run_escape_analyze = true
-    if run_escape_analyze
-        ir, escapes = find_escapes!(ir, nargs)
-    end
+    ir, escapes = find_escapes!(ir, nargs)
     #@Base.show ("before_sroa", ir)
     @timeit "SROA" ir = getfield_elim_pass!(ir)
     #@Base.show ir.new_nodes
