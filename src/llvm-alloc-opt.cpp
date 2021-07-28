@@ -323,6 +323,12 @@ void Optimizer::optimizeAll()
         auto orig = item.first;
         size_t sz = item.second;
         checkInst(orig);
+        if (orig->hasMetadataOtherThanDebugLoc()) {
+            MDNode *JLMD = orig->getMetadata("julia.noescape");
+            if (JLMD) {
+                printf("llvm-alloc-opt: find a metadata tag %p\n", orig);
+            }
+        }
         if (use_info.escaped) {
             if (use_info.hastypeof)
                 optimizeTag(orig);
