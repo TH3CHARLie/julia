@@ -322,14 +322,16 @@ void Optimizer::optimizeAll()
         auto item = worklist.pop_back_val();
         auto orig = item.first;
         size_t sz = item.second;
+        bool has_metadata_tag = false;
         checkInst(orig);
         if (orig->hasMetadataOtherThanDebugLoc()) {
             MDNode *JLMD = orig->getMetadata("julia.noescape");
             if (JLMD) {
-                printf("llvm-alloc-opt: find a metadata tag %p\n", orig);
+                has_metadata_tag = true;
+                printf("llvm-alloc-opt: find a metadata tag %p Function %p size %d\n", orig, &F, sz);
             }
         }
-        if (use_info.escaped) {
+        if (use_info.escaped && !has_metadata_tag) {
             if (use_info.hastypeof)
                 optimizeTag(orig);
             continue;
