@@ -290,6 +290,9 @@ function optimize(interp::AbstractInterpreter, opt::OptimizationState, params::O
     finish(interp, opt, params, ir, result)
 end
 
+include("compiler/escape.jl")
+using .EscapeAnalysis
+
 function run_passes(ci::CodeInfo, sv::OptimizationState)
     preserve_coverage = coverage_enabled(sv.mod)
     ir = convert_to_ircode(ci, copy_exprargs(ci.code), preserve_coverage, sv)
@@ -302,7 +305,7 @@ function run_passes(ci::CodeInfo, sv::OptimizationState)
     ir = compact!(ir)
     svdef = sv.linfo.def
     nargs = isa(svdef, Method) ? Int(svdef.nargs) : 0
-    ir, escapes = find_escapes!(ir, nargs+1)
+    find_escapes!(ir, nargs+1)
     #@Base.show ("before_sroa", ir)
     @timeit "SROA" ir = getfield_elim_pass!(ir)
     #@Base.show ir.new_nodes

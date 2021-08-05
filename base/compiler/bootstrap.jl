@@ -20,6 +20,10 @@ let fs = Any[typeinf_ext, typeinf, typeinf_edge, pure_eval_call, run_passes],
             println(stderr, "WARNING: tfunc missing for ", reinterpret(IntrinsicFunction, Int32(i)))
         end
     end
+    # bootstraps for escape analysis
+    # NOTE make sure we first infer `find_escapes!`, which seems to be costly when run in interpreter,
+    # otherwise the bootstrap of `typeinf_ext` can be really slow
+    pushfirst!(fs, EscapeAnalysis.find_escapes!, EscapeAnalysis.escape_builtin!)
     for f in fs
         for m in _methods_by_ftype(Tuple{typeof(f), Vararg{Any}}, 10, typemax(UInt))
             # remove any TypeVars from the intersection
