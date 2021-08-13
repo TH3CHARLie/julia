@@ -74,6 +74,13 @@ static bool hasObjref(Type *ty)
     return false;
 }
 
+static bool hasJuliaNoEscapeMeta(CallInst *inst) {
+    if (inst->hasMetadataOtherThanDebugLoc()) {
+        MDNode *JLMD = inst->getMetadata("julia.noescape");
+        return JLMD != nullptr;
+    }
+    return false;
+}
 /**
  * Promote `julia.gc_alloc_obj` which do not have escaping root to a alloca.
  * Uses that are not considered to escape the object (i.e. heap address) includes,
@@ -322,28 +329,7 @@ void Optimizer::optimizeAll()
         auto item = worklist.pop_back_val();
         auto orig = item.first;
         size_t sz = item.second;
-        bool has_metadata_tag = false;
         checkInst(orig);
-        if (orig->hasMetadataOtherThanDebugLoc()) {
-            MDNode *JLMD = orig->getMetadata("julia.noescape");
-            if (JLMD) {
-                has_metadata_tag = true;
-                printf("llvm-alloc-opt: find a metadata tag %p Function %p size %d\n", orig, &F, sz);
-            }
-        }
-        if (use_info.escaped && !has_metadata_tag) {
-            if (use_info.hastypeof)
-                optimizeTag(orig);
-            continue;
-        }
-        if (!use_info.addrescaped && !use_info.hasload && (!use_info.haspreserve ||
-                                                           !use_info.refstore)) {
-            // No one took the address, no one reads anything and there's no meaningful
-            // preserve of fields (either no preserve/ccall or no object reference fields)
-            // We can just delete all the uses.
-            removeAlloc(orig);
-            continue;
-        }
         bool has_ref = false;
         bool has_refaggr = false;
         for (auto memop: use_info.memops) {
@@ -357,6 +343,23 @@ void Optimizer::optimizeAll()
                     break;
                 }
             }
+        }
+        if (hasJuliaNoEscapeMeta(orig)) {
+            moveToStack(orig, sz, has_ref);
+            continue;
+        }
+        if (use_info.escaped) {
+            if (use_info.hastypeof)
+                optimizeTag(orig);
+            continue;
+        }
+        if (!use_info.addrescaped && !use_info.hasload && (!use_info.haspreserve ||
+                                                           !use_info.refstore)) {
+            // No one took the address, no one reads anything and there's no meaningful
+            // preserve of fields (either no preserve/ccall or no object reference fields)
+            // We can just delete all the uses.
+            removeAlloc(orig);
+            continue;
         }
         if (!use_info.hasunknownmem && !use_info.addrescaped && !has_refaggr) {
             // No one actually care about the memory layout of this object, split it.
@@ -1026,6 +1029,14 @@ void Optimizer::moveToStack(CallInst *orig_inst, size_t sz, bool has_ref)
             user->replaceUsesOfWith(orig_i, replace);
         }
         else if (isa<AddrSpaceCastInst>(user) || isa<BitCastInst>(user)) {
+            if (auto call_inst = dyn_cast<CallInst>(orig_inst)) {
+                if (hasJuliaNoEscapeMeta(call_inst) && isa<AddrSpaceCastInst>(user)) {
+                    auto *new_addrcast_inst = new AddrSpaceCastInst(new_i, user->getType(), "", user);
+                    user->replaceAllUsesWith(new_addrcast_inst);
+                    user->eraseFromParent();
+                    return;
+                }
+            }
             auto cast_t = PointerType::get(cast<PointerType>(user->getType())->getElementType(),
                                            0);
             auto replace_i = new_i;
