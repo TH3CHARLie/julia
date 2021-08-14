@@ -6,7 +6,7 @@ import Core:
     SimpleVector, GotoNode, GotoIfNot, Argument, IntrinsicFunction, Const, sizeof
 
 import ..Compiler:
-    Vector, IdDict, MethodInstance, IRCode, SSAValue, PiNode, PhiNode,
+    Vector, IdDict, MethodInstance, IRCode, SSAValue, PiNode, PhiNode, OptimizationState,
     PhiCNode, UpsilonNode, ReturnNode, IR_FLAG_EFFECT_FREE,
     ==, !, !==, !=, ≠, :, ≤, &, |, +, -, *, <, <<,
     isbitstype, ismutabletype, widenconst, argextype, argtype_to_function, isexpr,
@@ -55,8 +55,8 @@ copy(s::EscapeState) = EscapeState(copy(s.arguments), copy(s.ssavalues))
     EscapeInformation[x ⊓ y for (x, y) in zip(X.ssavalues, Y.ssavalues)])
 ==(X::EscapeState, Y::EscapeState) = X.arguments == Y.arguments && X.ssavalues == Y.ssavalues
 
-# const GLOBAL_ESCAPE_CACHE = IdDict{MethodInstance,EscapeState}()
-# __clear_escape_cache!() = empty!(GLOBAL_ESCAPE_CACHE)
+const GLOBAL_ESCAPE_CACHE = IdDict{MethodInstance,EscapeState}()
+__clear_escape_cache!() = empty!(GLOBAL_ESCAPE_CACHE)
 
 # An escape analysis implementation based on the algorithm described in the paper [MM02].
 # The analysis works on the lattice of `EscapeInformation` and transitions lattice elements
@@ -73,7 +73,7 @@ const IR_FLAG_NO_ESCAPE = 0x01 << 5
 # - implement more builtin handling
 # - (related to above) do alias analysis to some extent
 # - maybe flow-sensitivity (with sparse analysis state)
-function find_escapes!(ir::IRCode, nargs::Int)
+function find_escapes!(ir::IRCode, nargs::Int, sv::OptimizationState)
     (; stmts, sptypes, argtypes) = ir
     nstmts = length(stmts)
     state = EscapeState(length(ir.argtypes), nargs, nstmts) # flow-insensitive, only manage a single state
@@ -103,19 +103,18 @@ function find_escapes!(ir::IRCode, nargs::Int)
                         escape_call!(stmt.args, pc, state, ir, changes) || continue
                     end
                 elseif head === :invoke
-                    # linfo = first(stmt.args)
-                    # escapes_for_call = get(GLOBAL_ESCAPE_CACHE, linfo, nothing)
-                    # if isnothing(escapes_for_call)
-                    # TODO: (Xuanda) fix call cache
+                    linfo = first(stmt.args)
+                    escapes_for_call = get(GLOBAL_ESCAPE_CACHE, linfo, nothing)
+                    if isnothing(escapes_for_call)
                         add_changes!(stmt.args[3:end], ir, Escape(), changes)
-                    # else
-                    #     for (arg, info) in zip(stmt.args[2:end], escapes_for_call.arguments)
-                    #         if info === ReturnEscape()
-                    #             info = NoEscape()
-                    #         end
-                    #         push!(changes, (arg, info))
-                    #     end
-                    # end
+                    else
+                        for (arg, info) in zip(stmt.args[2:end], escapes_for_call.arguments)
+                            if info === ReturnEscape()
+                                info = NoEscape()
+                            end
+                            push!(changes, (arg, info))
+                        end
+                    end
                 # elseif head === :invoke
                 #     linfo = first(stmt.args)
                 #     escapes_for_call = get(GLOBAL_ESCAPE_CACHE, linfo, nothing)
@@ -249,7 +248,7 @@ function find_escapes!(ir::IRCode, nargs::Int)
             stmts.flag[pc] |= IR_FLAG_NO_ESCAPE
         end
     end
-
+    GLOBAL_ESCAPE_CACHE[sv.linfo] = state
     return state
 end
 

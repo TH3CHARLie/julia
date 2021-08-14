@@ -305,7 +305,7 @@ function run_passes(ci::CodeInfo, sv::OptimizationState)
     ir = compact!(ir)
     svdef = sv.linfo.def
     nargs = isa(svdef, Method) ? Int(svdef.nargs) : 0
-    find_escapes!(ir, nargs+1)
+    state = find_escapes!(ir, nargs+1, sv)
     #@Base.show ("before_sroa", ir)
     @timeit "SROA" ir = getfield_elim_pass!(ir)
     #@Base.show ir.new_nodes
