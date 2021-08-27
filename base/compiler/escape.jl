@@ -6,8 +6,8 @@ import Core:
     SimpleVector, GotoNode, GotoIfNot, Argument, IntrinsicFunction, Const, sizeof
 
 import ..Compiler:
-    Vector, IdDict, MethodInstance, IRCode, SSAValue, PiNode, PhiNode, OptimizationState,
-    PhiCNode, UpsilonNode, ReturnNode, IR_FLAG_EFFECT_FREE, BitSet,
+    Vector, IdDict, BitSet, MethodInstance, IRCode, SSAValue, PiNode, PhiNode,
+    PhiCNode, UpsilonNode, ReturnNode, IR_FLAG_EFFECT_FREE,
     ==, !, !==, !=, ≠, :, ≤, &, |, +, -, *, <, <<, ∪, ∩, ⊆,
     isbitstype, ismutabletype, widenconst, argextype, argtype_to_function, isexpr,
     is_meta_expr_head, copy, zip, empty!, length, get, first, isassigned, push!, isempty,
@@ -99,7 +99,6 @@ has_thrown_escape(x::EscapeLattice) = x.ThrownEscape
 has_global_escape(x::EscapeLattice) = x.GlobalEscape
 has_all_escape(x::EscapeLattice) = AllEscape() == x
 
-
 """
     can_elide_finalizer(x::EscapeLattice, pc::Int) -> Bool
 
@@ -181,8 +180,9 @@ const GLOBAL_ESCAPE_CACHE = IdDict{MethodInstance,EscapeState}()
 __clear_escape_cache!() = empty!(GLOBAL_ESCAPE_CACHE)
 
 const Changes = Vector{Tuple{Any,EscapeLattice}}
+
 """
-    find_escapes(ir::IRCode, nargs::Int) -> EscapeState
+    find_escapes!(ir::IRCode, nargs::Int) -> EscapeState
 
 Escape analysis implementation is based on the data-flow algorithm described in the paper [^MM02].
 The analysis works on the lattice of [`EscapeLattice`](@ref) and transitions lattice elements
@@ -196,7 +196,7 @@ encoded as property of `EscapeLattice`.
          Markas Mohnen, 2002, April.
          <https://api.semanticscholar.org/CorpusID:28519618>
 """
-function find_escapes!(ir::IRCode, nargs::Int, sv::OptimizationState)
+function find_escapes!(ir::IRCode, nargs::Int)
     (; stmts, sptypes, argtypes) = ir
     nstmts = length(stmts)
 
@@ -342,10 +342,9 @@ function find_escapes!(ir::IRCode, nargs::Int, sv::OptimizationState)
             stmts.flag[pc] |= IR_FLAG_NO_ESCAPE
         end
     end
-    GLOBAL_ESCAPE_CACHE[sv.linfo] = state
+
     return state
 end
-
 
 # propagate changes, and check convergence
 function propagate_changes!(state::EscapeState, changes::Changes)
@@ -481,6 +480,5 @@ function escape_builtin!(::typeof(getfield), args::Vector{Any}, pc::Int, state::
     end
     return true
 end
-
 
 end # module EscapeAnalysis
