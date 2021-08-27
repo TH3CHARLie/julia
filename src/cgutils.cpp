@@ -1581,7 +1581,7 @@ static jl_cgval_t typed_store(jl_codectx_t &ctx,
             jl_cgval_t oldval = ghostValue(jltype);
             jl_cgval_t argv[2] = { oldval, newval(oldval) };
             jl_datatype_t *rettyp = jl_apply_modify_type(jltype);
-            return emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv);
+            return emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv, false);
         }
     }
     Value *intcast = nullptr;
@@ -1864,7 +1864,7 @@ static jl_cgval_t typed_store(jl_codectx_t &ctx,
     if (ismodifyfield) {
         jl_cgval_t argv[2] = { oldval, rhs };
         jl_datatype_t *rettyp = jl_apply_modify_type(jltype);
-        oldval = emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv);
+        oldval = emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv, false);
     }
     else if (!issetfield) { // swapfield or replacefield
         if (realelty != elty)
@@ -3352,7 +3352,7 @@ static jl_cgval_t emit_setfield(jl_codectx_t &ctx,
         else if (ismodifyfield) {
             jl_cgval_t argv[2] = {oldval, rhs};
             jl_datatype_t *rettyp = jl_apply_modify_type(jfty);
-            oldval = emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv);
+            oldval = emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv, false);
         }
         return oldval;
     }
