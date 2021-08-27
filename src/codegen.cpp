@@ -1897,6 +1897,16 @@ static void coverageAllocLine(StringRef filename, int line)
     allocLine(coverageData[filename], line);
 }
 
+extern "C" JL_DLLEXPORT void jl_coverage_visit_line(const char* filename_, size_t len_filename, int line)
+{
+    StringRef filename = StringRef(filename_, len_filename);
+    if (imaging_mode || filename == "" || filename == "none" || filename == "no file" || filename == "<missing>" || line < 0)
+        return;
+    std::vector<logdata_block*> &vec = coverageData[filename];
+    uint64_t *ptr = allocLine(vec, line);
+    (*ptr)++;
+}
+
 // Memory allocation log (malloc_log)
 
 static logdata_t mallocData;
@@ -2995,7 +3005,10 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
                                     false,
                                     true,
                                     false,
-                                    false);
+                                    false,
+                                    false,
+                                    false,
+                                    "");
                     }
                 }
                 *ret = ary;
@@ -3137,18 +3150,21 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
 
     else if ((f == jl_builtin_setfield && (nargs == 3 || nargs == 4)) ||
              (f == jl_builtin_swapfield && (nargs == 3 || nargs == 4)) ||
-             (f == jl_builtin_replacefield && (nargs == 4 || nargs == 5 || nargs == 6))) {
+             (f == jl_builtin_replacefield && (nargs == 4 || nargs == 5 || nargs == 6)) ||
+             (true && f == jl_builtin_modifyfield && (nargs == 4 || nargs == 5))) {
         bool issetfield = f == jl_builtin_setfield;
         bool isreplacefield = f == jl_builtin_replacefield;
+        bool isswapfield = f == jl_builtin_swapfield;
+        bool ismodifyfield = f == jl_builtin_modifyfield;
         const jl_cgval_t undefval;
         const jl_cgval_t &obj = argv[1];
         const jl_cgval_t &fld = argv[2];
-        jl_cgval_t val = argv[isreplacefield ? 4 : 3];
-        const jl_cgval_t &cmp = isreplacefield ? argv[3] : undefval;
+        jl_cgval_t val = argv[isreplacefield || ismodifyfield ? 4 : 3];
+        const jl_cgval_t &cmp = isreplacefield || ismodifyfield ? argv[3] : undefval;
         enum jl_memory_order order = jl_memory_order_notatomic;
-        const std::string fname = issetfield ? "setfield!" : isreplacefield ? "replacefield!" : "swapfield!";
-        if (nargs >= (isreplacefield ? 5 : 4)) {
-            const jl_cgval_t &ord = argv[isreplacefield ? 5 : 4];
+        const std::string fname = issetfield ? "setfield!" : isreplacefield ? "replacefield!" : isswapfield ? "swapfield!" : "modifyfield!";
+        if (nargs >= (isreplacefield || ismodifyfield ? 5 : 4)) {
+            const jl_cgval_t &ord = argv[isreplacefield || ismodifyfield ? 5 : 4];
             emit_typecheck(ctx, ord, (jl_value_t*)jl_symbol_type, fname);
             if (!ord.constant)
                 return false;
@@ -3182,7 +3198,7 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
             if (idx != -1) {
                 jl_value_t *ft = jl_svecref(uty->types, idx);
                 if (!jl_has_free_typevars(ft)) {
-                    if (!jl_subtype(val.typ, ft)) {
+                    if (!ismodifyfield && !jl_subtype(val.typ, ft)) {
                         emit_typecheck(ctx, val, ft, fname);
                         val = update_julia_type(ctx, val, ft);
                     }
@@ -3198,8 +3214,11 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
                                 isreplacefield ?
                                 (isatomic ? "replacefield!: atomic field cannot be written non-atomically"
                                           : "replacefield!: non-atomic field cannot be written atomically") :
+                                isswapfield ?
                                 (isatomic ? "swapfield!: atomic field cannot be written non-atomically"
-                                          : "swapfield!: non-atomic field cannot be written atomically"));
+                                          : "swapfield!: non-atomic field cannot be written atomically") :
+                                (isatomic ? "modifyfield!: atomic field cannot be written non-atomically"
+                                          : "modifyfield!: non-atomic field cannot be written atomically"));
                         *ret = jl_cgval_t();
                         return true;
                     }
@@ -3217,7 +3236,8 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
                             (needlock || fail_order <= jl_memory_order_notatomic)
                             ? (isboxed ? AtomicOrdering::Unordered : AtomicOrdering::NotAtomic) // TODO: we should do this for anything with CountTrackedPointers(elty).count > 0
                             : get_llvm_atomic_order(fail_order),
-                            needlock, issetfield, isreplacefield);
+                            needlock, issetfield, isreplacefield, isswapfield, ismodifyfield,
+                            fname);
                     return true;
                 }
             }
@@ -5183,9 +5203,48 @@ static Function* gen_cfun_wrapper(
         // add nest parameter (pointer to jl_value_t* data array) after sret arg
         assert(closure_types);
         std::vector<Type*> fargt_sig(sig.fargt_sig);
+
         fargt_sig.insert(fargt_sig.begin() + sig.sret, T_pprjlvalue);
+
+        // Shift LLVM attributes for parameters one to the right, as
+        // we are adding the extra nest parameter after sret arg.
+        std::vector<std::pair<unsigned, AttributeSet>> newAttributes;
+        newAttributes.reserve(attributes.getNumAttrSets() + 1);
+        auto it = attributes.index_begin();
+
+        // Skip past FunctionIndex
+        if (it == AttributeList::AttrIndex::FunctionIndex) {
+            ++it;
+        }
+
+        // Move past ReturnValue and parameter return value
+        for (;it < AttributeList::AttrIndex::FirstArgIndex + sig.sret; ++it) {
+            if (attributes.hasAttributes(it)) {
+                newAttributes.emplace_back(it, attributes.getAttributes(it));
+            }
+        }
+
+        // Add the new nest attribute
+        AttrBuilder attrBuilder;
+        attrBuilder.addAttribute(Attribute::Nest);
+        newAttributes.emplace_back(it, AttributeSet::get(jl_LLVMContext, attrBuilder));
+
+        // Shift forward the rest of the attributes
+        for(;it < attributes.index_end(); ++it) {
+            if (attributes.hasAttributes(it)) {
+                newAttributes.emplace_back(it + 1, attributes.getAttributes(it));
+            }
+        }
+
+        // Remember to add back FunctionIndex
+        if (attributes.hasAttributes(AttributeList::AttrIndex::FunctionIndex)) {
+            newAttributes.emplace_back(AttributeList::AttrIndex::FunctionIndex,
+                                       attributes.getAttributes(AttributeList::AttrIndex::FunctionIndex));
+        }
+
+        // Create the new AttributeList
+        attributes = AttributeList::get(jl_LLVMContext, newAttributes);
         functype = FunctionType::get(sig.sret ? T_void : sig.prt, fargt_sig, /*isVa*/false);
-        attributes = attributes.addAttribute(jl_LLVMContext, 1 + sig.sret, Attribute::Nest);
     }
     else {
         functype = sig.functype();

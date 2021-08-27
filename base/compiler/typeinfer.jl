@@ -354,16 +354,10 @@ end
 
 function transform_result_for_cache(interp::AbstractInterpreter, linfo::MethodInstance,
                                     valid_worlds::WorldRange, @nospecialize(inferred_result))
-    local const_flags::Int32
     # If we decided not to optimize, drop the OptimizationState now.
     # External interpreters can override as necessary to cache additional information
     if inferred_result isa OptimizationState
-        opt = inferred_result
-        if isa(opt.src, CodeInfo)
-            inferred_result = ir_to_codeinf!(opt)
-        else
-            inferred_result = opt.src
-        end
+        inferred_result = ir_to_codeinf!(inferred_result)
     end
     if inferred_result isa CodeInfo
         inferred_result.min_world = first(valid_worlds)
@@ -639,7 +633,7 @@ function type_annotate!(sv::InferenceState, run_optimizer::Bool)
         expr = body[i]
         if isa(expr, GotoIfNot)
             if !isa(states[expr.dest], VarTable)
-                body[i] = expr.cond
+                body[i] = Expr(:call, GlobalRef(Core, :typeassert), expr.cond, GlobalRef(Core, :Bool))
             end
         end
     end

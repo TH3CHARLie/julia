@@ -144,7 +144,7 @@ function complete_symbol(sym::String, ffunc, context_module::Module=Main)
             if isa(b, Module)
                 mod = b
                 lookup_module = true
-            elseif Base.isstructtype(typeof(b))
+            else
                 lookup_module = false
                 t = typeof(b)
             end
@@ -907,6 +907,10 @@ function UndefVarError_hint(io::IO, ex::UndefVarError)
         print(io, "\nsuggestion: Use `||` for short-circuiting boolean OR.")
     elseif var === :and
         print(io, "\nsuggestion: Use `&&` for short-circuiting boolean AND.")
+    elseif var === :help
+        println(io)
+        # Show friendly help message when user types help or help() and help is undefined
+        show(io, MIME("text/plain"), Base.Docs.parsedoc(Base.Docs.keywords[:help]))
     end
 end
 
