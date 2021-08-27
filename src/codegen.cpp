@@ -4669,6 +4669,9 @@ static jl_cgval_t emit_expr(jl_codectx_t &ctx, jl_value_t *expr, ssize_t ssaval)
             if ((ssaflag & IR_FLAG_NO_ESCAPE) != 0) {
                 tag_metadata = true;
                 printf("locate no-escape flag set stmt !!!!!! %d %d\n", ssaflag & IR_FLAG_NO_ESCAPE, ssaval);
+                printf("file name: %s func name: %s\n", ctx.file.str().c_str(), ctx.funcName.c_str());
+                // jl_(expr);
+                // jl_(ctx.code);
             }
             return emit_new_struct(ctx, jl_tparam0(ty), nargs - 1, &argv[1], tag_metadata);
         }
