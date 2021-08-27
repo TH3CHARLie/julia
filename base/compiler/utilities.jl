@@ -27,6 +27,9 @@ function _all(@nospecialize(f), a)
     return true
 end
 
+all(itr) = all(identity, itr)
+all(f, itr) = _all(f, itr)
+
 function contains_is(itr, @nospecialize(x))
     for y in itr
         if y === x
