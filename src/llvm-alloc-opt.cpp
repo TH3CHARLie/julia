@@ -74,6 +74,13 @@ static bool hasObjref(Type *ty)
     return false;
 }
 
+static bool hasJuliaNoEscapeMeta(CallInst *inst) {
+    if (inst->hasMetadataOtherThanDebugLoc()) {
+        MDNode *JLMD = inst->getMetadata("julia.noescape");
+        return JLMD != nullptr;
+    }
+    return false;
+}
 /**
  * Promote `julia.gc_alloc_obj` which do not have escaping root to a alloca.
  * Uses that are not considered to escape the object (i.e. heap address) includes,
@@ -323,19 +330,6 @@ void Optimizer::optimizeAll()
         auto orig = item.first;
         size_t sz = item.second;
         checkInst(orig);
-        if (use_info.escaped) {
-            if (use_info.hastypeof)
-                optimizeTag(orig);
-            continue;
-        }
-        if (!use_info.addrescaped && !use_info.hasload && (!use_info.haspreserve ||
-                                                           !use_info.refstore)) {
-            // No one took the address, no one reads anything and there's no meaningful
-            // preserve of fields (either no preserve/ccall or no object reference fields)
-            // We can just delete all the uses.
-            removeAlloc(orig);
-            continue;
-        }
         bool has_ref = false;
         bool has_refaggr = false;
         for (auto memop: use_info.memops) {
@@ -349,6 +343,23 @@ void Optimizer::optimizeAll()
                     break;
                 }
             }
+        }
+        // if (hasJuliaNoEscapeMeta(orig)) {
+        //     moveToStack(orig, sz, has_ref);
+        //     continue;
+        // }
+        if (use_info.escaped) {
+            if (use_info.hastypeof)
+                optimizeTag(orig);
+            continue;
+        }
+        if (!use_info.addrescaped && !use_info.hasload && (!use_info.haspreserve ||
+                                                           !use_info.refstore)) {
+            // No one took the address, no one reads anything and there's no meaningful
+            // preserve of fields (either no preserve/ccall or no object reference fields)
+            // We can just delete all the uses.
+            removeAlloc(orig);
+            continue;
         }
         if (!use_info.hasunknownmem && !use_info.addrescaped && !has_refaggr) {
             // No one actually care about the memory layout of this object, split it.
@@ -939,6 +950,9 @@ void Optimizer::moveToStack(CallInst *orig_inst, size_t sz, bool has_ref)
     }
     insertLifetime(ptr, ConstantInt::get(pass.T_int64, sz), orig_inst);
     auto new_inst = cast<Instruction>(prolog_builder.CreateBitCast(ptr, pass.T_pjlvalue));
+    // if (hasJuliaNoEscapeMeta(orig_inst)) {
+    //     new_inst = cast<Instruction>(prolog_builder.CreateAddrSpaceCast(new_inst, pass.T_prjlvalue));
+    // }
     new_inst->takeName(orig_inst);
 
     auto simple_replace = [&] (Instruction *orig_i, Instruction *new_i) {
@@ -975,11 +989,19 @@ void Optimizer::moveToStack(CallInst *orig_inst, size_t sz, bool has_ref)
     };
     // Both `orig_i` and `new_i` should be pointer of the same type
     // but possibly different address spaces. `new_i` is always in addrspace 0.
+    // printf("LLVM code before opt\n");
+    // llvm_dump(&F);
     auto replace_inst = [&] (Instruction *user) {
+        // llvm_dump(user);
         Instruction *orig_i = cur.orig_i;
         Instruction *new_i = cur.new_i;
+
+        // llvm_dump(orig_i);
+        // llvm_dump(new_i);
         if (isa<LoadInst>(user) || isa<StoreInst>(user)) {
             user->replaceUsesOfWith(orig_i, new_i);
+            // printf("hit here\n");
+            // llvm_dump(user);
         }
         else if (auto call = dyn_cast<CallInst>(user)) {
             auto callee = call->getCalledOperand();
@@ -1018,6 +1040,14 @@ void Optimizer::moveToStack(CallInst *orig_inst, size_t sz, bool has_ref)
             user->replaceUsesOfWith(orig_i, replace);
         }
         else if (isa<AddrSpaceCastInst>(user) || isa<BitCastInst>(user)) {
+            // if (auto call_inst = dyn_cast<CallInst>(orig_inst)) {
+            //     if (hasJuliaNoEscapeMeta(call_inst) && isa<AddrSpaceCastInst>(user)) {
+            //         auto *new_addrcast_inst = new AddrSpaceCastInst(new_i, user->getType(), "", user);
+            //         user->replaceAllUsesWith(new_addrcast_inst);
+            //         user->eraseFromParent();
+            //         return;
+            //     }
+            // }
             auto cast_t = PointerType::get(cast<PointerType>(user->getType())->getElementType(),
                                            0);
             auto replace_i = new_i;
@@ -1040,6 +1070,9 @@ void Optimizer::moveToStack(CallInst *orig_inst, size_t sz, bool has_ref)
             push_frame(gep, new_gep);
         }
         else {
+            printf("LLVM code before crashing:\n");
+            llvm_dump(user);
+            // llvm_dump(&F);
             abort();
         }
     };

@@ -1572,7 +1572,7 @@ static jl_cgval_t typed_store(jl_codectx_t &ctx,
             Success = ctx.builder.CreateZExt(Success, T_int8);
             jl_cgval_t argv[2] = {ghostValue(jltype), mark_julia_type(ctx, Success, false, jl_bool_type)};
             jl_datatype_t *rettyp = jl_apply_cmpswap_type(jltype);
-            return emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv);
+            return emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv, false);
         }
         else if (isswapfield) {
             return ghostValue(jltype);
@@ -1581,7 +1581,7 @@ static jl_cgval_t typed_store(jl_codectx_t &ctx,
             jl_cgval_t oldval = ghostValue(jltype);
             jl_cgval_t argv[2] = { oldval, newval(oldval) };
             jl_datatype_t *rettyp = jl_apply_modify_type(jltype);
-            return emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv);
+            return emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv, false);
         }
     }
     Value *intcast = nullptr;
@@ -1864,7 +1864,7 @@ static jl_cgval_t typed_store(jl_codectx_t &ctx,
     if (ismodifyfield) {
         jl_cgval_t argv[2] = { oldval, rhs };
         jl_datatype_t *rettyp = jl_apply_modify_type(jltype);
-        oldval = emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv);
+        oldval = emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv, false);
     }
     else if (!issetfield) { // swapfield or replacefield
         if (realelty != elty)
@@ -1883,7 +1883,7 @@ static jl_cgval_t typed_store(jl_codectx_t &ctx,
             Success = ctx.builder.CreateZExt(Success, T_int8);
             jl_cgval_t argv[2] = {oldval, mark_julia_type(ctx, Success, false, jl_bool_type)};
             jl_datatype_t *rettyp = jl_apply_cmpswap_type(jltype);
-            oldval = emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv);
+            oldval = emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv, false);
         }
     }
     return oldval;
@@ -3347,12 +3347,12 @@ static jl_cgval_t emit_setfield(jl_codectx_t &ctx,
             Success = ctx.builder.CreateZExt(Success, T_int8);
             jl_cgval_t argv[2] = {oldval, mark_julia_type(ctx, Success, false, jl_bool_type)};
             jl_datatype_t *rettyp = jl_apply_cmpswap_type(jfty);
-            oldval = emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv);
+            oldval = emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv, false);
         }
         else if (ismodifyfield) {
             jl_cgval_t argv[2] = {oldval, rhs};
             jl_datatype_t *rettyp = jl_apply_modify_type(jfty);
-            oldval = emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv);
+            oldval = emit_new_struct(ctx, (jl_value_t*)rettyp, 2, argv, false);
         }
         return oldval;
     }
@@ -3368,7 +3368,7 @@ static jl_cgval_t emit_setfield(jl_codectx_t &ctx,
     }
 }
 
-static jl_cgval_t emit_new_struct(jl_codectx_t &ctx, jl_value_t *ty, size_t nargs, const jl_cgval_t *argv)
+static jl_cgval_t emit_new_struct(jl_codectx_t &ctx, jl_value_t *ty, size_t nargs, const jl_cgval_t *argv, bool tag_metadata)
 {
     assert(jl_is_datatype(ty));
     assert(jl_is_concrete_type(ty));
@@ -3522,6 +3522,11 @@ static jl_cgval_t emit_new_struct(jl_codectx_t &ctx, jl_value_t *ty, size_t narg
         }
         Value *strct = emit_allocobj(ctx, jl_datatype_size(sty),
                                      literal_pointer_val(ctx, (jl_value_t*)ty));
+        if (tag_metadata) {
+            MDNode* temp_node = MDNode::get(jl_LLVMContext, ConstantAsMetadata::get(ConstantInt::get(jl_LLVMContext, llvm::APInt(64, 0, false))));
+            MDNode* node = MDNode::get(jl_LLVMContext, temp_node);
+            ((CallInst *)strct)->setMetadata("julia.noescape", node);
+        }
         jl_cgval_t strctinfo = mark_julia_type(ctx, strct, true, ty);
         strct = decay_derived(ctx, strct);
         undef_derived_strct(ctx.builder, strct, sty, strctinfo.tbaa);
